@@ -1,0 +1,41 @@
+name = "f1-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# D1 — primary store for accounts, keys, usage events, audit log
+[[d1_databases]]
+binding = "DB"
+database_name = "f1"
+database_id = "REPLACE_AFTER_wrangler_d1_create"
+
+# KV — hot-path cache: f1_key_id → {account_id, tier, monthly_token_quota}
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_AFTER_wrangler_kv_namespace_create"
+
+[vars]
+# Origin allowed to call /api/* dashboard endpoints
+ALLOWED_ORIGIN = "https://mini-on-ai.com"
+
+# Site URL used in Stripe success/cancel callbacks
+SITE_URL = "https://mini-on-ai.com"
+
+# Stripe Price IDs — fill in after creating products in Stripe dashboard
+STRIPE_PRICE_PRO = "REPLACE_WITH_STRIPE_PRICE_ID_PRO"
+STRIPE_PRICE_SCALE = "REPLACE_WITH_STRIPE_PRICE_ID_SCALE"
+
+# Pricing-tier quotas
+PRO_MONTHLY_TOKEN_QUOTA = "1000000"
+SCALE_MONTHLY_TOKEN_QUOTA = "25000000"
+
+# Brevo transactional email
+BREVO_SENDER_EMAIL = "hello@mini-on-ai.com"
+BREVO_SENDER_NAME = "mini-on-ai"
+
+# Secrets (add via `wrangler secret put <NAME>`):
+#   STRIPE_SECRET_KEY            — sk_live_... or sk_test_...
+#   STRIPE_WEBHOOK_SECRET        — whsec_... (per-endpoint)
+#   BREVO_API_KEY                — xkeysib-...
+#   F1_KEY_ENCRYPTION_MASTER     — 32+ random bytes base64-encoded; AES-GCM master key for customer Anthropic-key encryption
+#   F1_ADMIN_TOKEN               — random; required to read /api/admin-stats (Telegram /f1-stats)
+#   F1_FACTORY_DASHBOARD_TOKEN   — random; the factory's own dashboard token (so /api/public-stats can find it)

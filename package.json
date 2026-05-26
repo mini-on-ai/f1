@@ -1,0 +1,14 @@
+{
+  "name": "f1-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply f1 --local",
+    "db:migrate:remote": "wrangler d1 migrations apply f1 --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
