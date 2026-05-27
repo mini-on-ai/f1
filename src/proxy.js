@@ -49,7 +49,14 @@ export async function handleProxy(request, env, ctx, path) {
 
   try {
     const cached = await env.KV.get(cacheKey, "json");
-    if (cached) keyMeta = cached;
+    if (cached) {
+      // Re-check revocation even on a cache hit — revokedAt is stored in the
+      // cached object so revocation is reflected immediately without a D1 round trip.
+      if (cached.revokedAt) {
+        return proxyError("Invalid or revoked F1 API key.", 401);
+      }
+      keyMeta = cached;
+    }
   } catch (_) {
     // KV miss — fall through to D1
   }
@@ -85,6 +92,7 @@ export async function handleProxy(request, env, ctx, path) {
       tier: row.tier,
       monthlyTokenQuota: row.monthly_token_quota,
       promptStorageOptin: row.prompt_storage_optin === 1,
+      revokedAt: row.revoked_at || null,   // cached so revocation is visible without a D1 hit
       // Store encrypted blobs as base64 so KV can cache them as JSON
       ciphertext: row.anthropic_key_ciphertext,
       iv: row.anthropic_key_iv,

@@ -61,8 +61,8 @@ CREATE TABLE usage_events (
   -- Optional: only populated when accounts.prompt_storage_optin = 1. Max 200 chars.
   prompt_prefix TEXT,
 
-  -- SHA-256 of first 2k chars of input. Always populated. Used for caching-candidate insight.
-  -- Reveals only repetition shape, not content.
+  -- SHA-256 of first 2k chars of input. Populated only when prompt_storage_optin = 1.
+  -- Reveals only repetition shape (which prompts repeat), not content. Gated behind opt-in.
   input_hash TEXT
 );
 

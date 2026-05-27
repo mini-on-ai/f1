@@ -24,7 +24,7 @@
  *   GET  /api/health                  — binding health check
  */
 
-import { encryptApiKey, hashToken, generateToken } from "./crypto.js";
+import { encryptApiKey, hashToken, generateToken, safeCompare } from "./crypto.js";
 import { runInsights } from "./insights.js";
 import { sendBudgetAlertEmail, sendBudgetAlertWebhook } from "./alerts.js";
 
@@ -631,26 +631,30 @@ async function handleSetAlerts(request, env) {
     alertEmail = e;
   }
 
-  // Validate webhook URL (optional)
+  // Validate webhook URL — hard allowlist to prevent SSRF.
+  // Only Slack incoming-webhook and Discord webhook URLs are accepted.
+  // Discord webhooks must use the /slack suffix so our Slack-format payload works.
   let webhookUrl = null;
-  let webhookWarning = null;
   if (body.alert_webhook_url && typeof body.alert_webhook_url === "string" && body.alert_webhook_url.trim()) {
     const u = body.alert_webhook_url.trim();
-    if (!u.startsWith("https://")) {
-      return corsJson(env, { error: "alert_webhook_url must be https://." }, 400);
-    }
     if (u.length > 500) {
       return corsJson(env, { error: "alert_webhook_url is too long." }, 400);
     }
-    webhookUrl = u;
-    const isSlack = u.startsWith("https://hooks.slack.com/");
-    const isDiscord = u.startsWith("https://discord.com/api/webhooks/") || u.startsWith("https://discordapp.com/api/webhooks/");
+    const isSlack = u.startsWith("https://hooks.slack.com/services/");
+    const isDiscord =
+      u.startsWith("https://discord.com/api/webhooks/") ||
+      u.startsWith("https://discordapp.com/api/webhooks/");
     if (!isSlack && !isDiscord) {
-      webhookWarning = "URL does not match Slack or Discord webhook patterns. Saved anyway — verify with the Send test alert button.";
+      return corsJson(env, {
+        error: "alert_webhook_url must be a Slack (https://hooks.slack.com/services/…) or Discord (https://discord.com/api/webhooks/…) webhook URL.",
+      }, 400);
     }
     if (isDiscord && !u.endsWith("/slack")) {
-      webhookWarning = "Discord webhook URLs must end with /slack for our Slack-format payload. Append /slack and save again.";
+      return corsJson(env, {
+        error: "Discord webhook URLs must end with /slack for Slack-format payload compatibility. Append /slack to your URL.",
+      }, 400);
     }
+    webhookUrl = u;
   }
 
   // Changing the budget re-arms the alert for this month.
@@ -670,7 +674,6 @@ async function handleSetAlerts(request, env) {
     alert_budget_usd: budget,
     alert_email: alertEmail,
     alert_webhook_url: webhookUrl,
-    warning: webhookWarning,
   });
 }
 
@@ -766,7 +769,7 @@ async function handlePublicStats(request, env) {
 
 async function handleAdminStats(request, env) {
   const token = new URL(request.url).searchParams.get("token");
-  if (!token || token !== env.F1_ADMIN_TOKEN) {
+  if (!token || !env.F1_ADMIN_TOKEN || !(await safeCompare(token, env.F1_ADMIN_TOKEN))) {
     return corsJson(env, { error: "Unauthorized." }, 401);
   }
 
@@ -815,12 +818,26 @@ async function handleDeleteAccount(request, env) {
   const account = await requireAccount(request, env);
   if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
 
+  // Read key hashes BEFORE deleting so we can purge the KV hot-path cache.
+  // Without this, deleted accounts' API keys remain usable for up to 5 minutes
+  // (the KV TTL) after deletion — the encrypted Anthropic key is cached in KV.
+  const keyRows = await env.DB.prepare(
+    "SELECT key_hash FROM api_keys WHERE account_id = ?"
+  ).bind(account.id).all();
+
   await env.DB.batch([
     env.DB.prepare("DELETE FROM key_access_log WHERE account_id = ?").bind(account.id),
     env.DB.prepare("DELETE FROM usage_events WHERE account_id = ?").bind(account.id),
     env.DB.prepare("DELETE FROM api_keys WHERE account_id = ?").bind(account.id),
     env.DB.prepare("DELETE FROM accounts WHERE id = ?").bind(account.id),
   ]);
+
+  // Purge KV cache entries for every key belonging to this account.
+  await Promise.all(
+    (keyRows.results || []).map(k =>
+      env.KV.delete(`key:${k.key_hash}`).catch(() => {})
+    )
+  );
 
   return corsJson(env, { deleted: true });
 }
@@ -950,11 +967,21 @@ async function verifyStripeSignature(payload, signatureHeader, secret) {
       ["sign"]
     );
     const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
-    const expected = Array.from(new Uint8Array(sig))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    const expectedBytes = new Uint8Array(sig);
 
-    return expected === signature;
+    // Decode the provided hex signature to bytes for constant-time comparison.
+    // A simple string === is short-circuit and leaks the position of the first
+    // differing character via timing — use XOR accumulator instead.
+    if (signature.length !== expectedBytes.length * 2) return false;
+    const providedBytes = new Uint8Array(expectedBytes.length);
+    for (let i = 0; i < expectedBytes.length; i++) {
+      providedBytes[i] = parseInt(signature.slice(i * 2, i * 2 + 2), 16);
+    }
+    let diff = 0;
+    for (let i = 0; i < expectedBytes.length; i++) {
+      diff |= expectedBytes[i] ^ providedBytes[i];
+    }
+    return diff === 0;
   } catch {
     return false;
   }
