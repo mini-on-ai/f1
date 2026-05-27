@@ -15,6 +15,9 @@
  *   GET  /api/usage                   — paginated raw events
  *   GET  /api/insights                — 5 rule-based optimization insights
  *   GET  /api/key-access-log          — audit log of key usage
+ *   GET  /api/alerts                  — fetch alert settings + suggested budget
+ *   POST /api/alerts                  — set monthly budget / email / webhook
+ *   POST /api/alerts/test             — fire a synthetic alert to verify channels
  *   GET  /api/public-stats            — unauthenticated factory rollup (for landing-page widget)
  *   GET  /api/admin-stats             — MRR + subscriber count (Telegram /f1-stats)
  *   DELETE /api/account               — GDPR: delete all account data
@@ -23,6 +26,7 @@
 
 import { encryptApiKey, hashToken, generateToken } from "./crypto.js";
 import { runInsights } from "./insights.js";
+import { sendBudgetAlertEmail, sendBudgetAlertWebhook } from "./alerts.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route dispatcher (called from index.js)
@@ -83,6 +87,15 @@ export async function handleApi(request, env, path) {
     }
     if (path === "/api/prompt-optin" && request.method === "POST") {
       return handleSetPromptOptin(request, env);
+    }
+    if (path === "/api/alerts" && request.method === "GET") {
+      return handleGetAlerts(request, env);
+    }
+    if (path === "/api/alerts" && request.method === "POST") {
+      return handleSetAlerts(request, env);
+    }
+    if (path === "/api/alerts/test" && request.method === "POST") {
+      return handleTestAlert(request, env);
     }
 
     return corsJson(env, { error: "Not found" }, 404);
@@ -557,6 +570,151 @@ async function handleSetPromptOptin(request, env) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/alerts — fetch current alert settings + suggested budget
+// POST /api/alerts — update alert settings
+// POST /api/alerts/test — fire a synthetic alert to verify channels
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleGetAlerts(request, env) {
+  const account = await requireAccount(request, env);
+  if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
+
+  // Rolling 30-day spend for the personalized-suggestion default.
+  const row = await env.DB.prepare(
+    `SELECT COALESCE(SUM(usd_cost), 0) AS spent_30d
+     FROM usage_events
+     WHERE account_id = ?
+       AND ts >= datetime('now', '-30 days')`
+  ).bind(account.id).first();
+
+  const spent30d = Number(row?.spent_30d || 0);
+  // suggested = max($50, ceil(1.5 * spent_30d / 10) * 10)
+  const raw = 1.5 * spent30d;
+  const suggested = Math.max(50, Math.ceil(raw / 10) * 10);
+
+  return corsJson(env, {
+    alert_budget_usd: account.alert_budget_usd,
+    alert_email: account.alert_email,
+    alert_webhook_url: account.alert_webhook_url,
+    alert_fired_at: account.alert_fired_at,
+    alert_fired_month: account.alert_fired_month,
+    suggested_budget_usd: suggested,
+    spent_last_30d_usd: Number(spent30d.toFixed(2)),
+    account_email: account.email,
+  });
+}
+
+async function handleSetAlerts(request, env) {
+  const account = await requireAccount(request, env);
+  if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
+
+  const body = await parseJson(request);
+  if (body.error) return corsJson(env, body, 400);
+
+  // Validate budget
+  let budget = null;
+  if (body.alert_budget_usd !== null && body.alert_budget_usd !== undefined && body.alert_budget_usd !== "") {
+    const n = Number(body.alert_budget_usd);
+    if (!Number.isFinite(n) || n <= 0) {
+      return corsJson(env, { error: "alert_budget_usd must be a positive number or null." }, 400);
+    }
+    budget = n;
+  }
+
+  // Validate email (optional override)
+  let alertEmail = null;
+  if (body.alert_email && typeof body.alert_email === "string" && body.alert_email.trim()) {
+    const e = body.alert_email.trim();
+    if (!e.includes("@") || e.length > 254) {
+      return corsJson(env, { error: "alert_email is not a valid address." }, 400);
+    }
+    alertEmail = e;
+  }
+
+  // Validate webhook URL (optional)
+  let webhookUrl = null;
+  let webhookWarning = null;
+  if (body.alert_webhook_url && typeof body.alert_webhook_url === "string" && body.alert_webhook_url.trim()) {
+    const u = body.alert_webhook_url.trim();
+    if (!u.startsWith("https://")) {
+      return corsJson(env, { error: "alert_webhook_url must be https://." }, 400);
+    }
+    if (u.length > 500) {
+      return corsJson(env, { error: "alert_webhook_url is too long." }, 400);
+    }
+    webhookUrl = u;
+    const isSlack = u.startsWith("https://hooks.slack.com/");
+    const isDiscord = u.startsWith("https://discord.com/api/webhooks/") || u.startsWith("https://discordapp.com/api/webhooks/");
+    if (!isSlack && !isDiscord) {
+      webhookWarning = "URL does not match Slack or Discord webhook patterns. Saved anyway — verify with the Send test alert button.";
+    }
+    if (isDiscord && !u.endsWith("/slack")) {
+      webhookWarning = "Discord webhook URLs must end with /slack for our Slack-format payload. Append /slack and save again.";
+    }
+  }
+
+  // Changing the budget re-arms the alert for this month.
+  await env.DB.prepare(
+    `UPDATE accounts
+     SET alert_budget_usd = ?,
+         alert_email = ?,
+         alert_webhook_url = ?,
+         alert_fired_month = NULL,
+         alert_fired_at = NULL,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).bind(budget, alertEmail, webhookUrl, account.id).run();
+
+  return corsJson(env, {
+    ok: true,
+    alert_budget_usd: budget,
+    alert_email: alertEmail,
+    alert_webhook_url: webhookUrl,
+    warning: webhookWarning,
+  });
+}
+
+async function handleTestAlert(request, env) {
+  const account = await requireAccount(request, env);
+  if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
+
+  const dashboardUrl = `${env.SITE_URL || "https://mini-on-ai.com"}/f1/dashboard`;
+  const to = account.alert_email || account.email;
+  const mtdSpend = 42.0;
+  const threshold = 50.0;
+
+  const results = { email: false, webhook: null };
+
+  try {
+    results.email = await sendBudgetAlertEmail(env, { to, mtdSpend, threshold, dashboardUrl });
+  } catch (e) {
+    console.error("[api] test alert email error:", e.message);
+    results.email = false;
+  }
+
+  if (account.alert_webhook_url) {
+    try {
+      results.webhook = await sendBudgetAlertWebhook(env, {
+        url: account.alert_webhook_url,
+        mtdSpend,
+        threshold,
+        accountId: account.id,
+        dashboardUrl,
+      });
+    } catch (e) {
+      console.error("[api] test alert webhook error:", e.message);
+      results.webhook = false;
+    }
+  }
+
+  return corsJson(env, {
+    ok: true,
+    sent: results,
+    note: "Synthetic alert (MTD $42, threshold $50). Does not affect your real fired-once-per-month state.",
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/public-stats — unauthenticated factory rollup (landing-page widget)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -712,6 +870,7 @@ async function sendWelcomeEmail(env, { email, tier, apiKey, dashboardUrl }) {
   <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#6366F1;">Your Dashboard</h2>
   <p><a href="${dashboardUrl}" style="color:#6366F1;">${dashboardUrl}</a></p>
   <p style="color:#94a3b8;font-size:13px;">Bookmark this link — it's your key-access log, spend insights, and billing portal. No password required.</p>
+  <p style="color:#94a3b8;font-size:13px;"><strong style="color:#e2e8f0;">Tip:</strong> set a monthly budget on your dashboard (Settings tab) and we'll email you the moment your Anthropic spend crosses it. Free on every tier.</p>
 
   <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#6366F1;">Next Step: Upload Your Anthropic Key</h2>
   <p style="color:#94a3b8;font-size:13px;">Your Anthropic API key is needed so F1 can proxy your calls. Paste it on your dashboard, or send it via:</p>

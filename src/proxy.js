@@ -11,6 +11,7 @@
 
 import { computeCost } from "./pricing.js";
 import { decryptApiKey, hashToken, hashInputPrefix, hashIp, generateToken } from "./crypto.js";
+import { checkAndFireBudgetAlert } from "./alerts.js";
 
 const ANTHROPIC_API_BASE = "https://api.anthropic.com";
 
@@ -176,6 +177,10 @@ export async function handleProxy(request, env, ctx, path) {
             promptPrefix: null,
             inputHash: null,
           });
+
+          // Budget-alert check: fires at most once per calendar month per account.
+          // Isolated try/catch is inside alerts.js — never breaks the hot path.
+          await checkAndFireBudgetAlert(env, keyMeta.accountId);
         } catch (e) {
           console.warn("[proxy] Failed to extract/record usage:", e.message);
         }
