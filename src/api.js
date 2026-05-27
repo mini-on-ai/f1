@@ -81,6 +81,9 @@ export async function handleApi(request, env, path) {
     if (path === "/api/cutover-date" && request.method === "POST") {
       return handleSetCutoverDate(request, env);
     }
+    if (path === "/api/prompt-optin" && request.method === "POST") {
+      return handleSetPromptOptin(request, env);
+    }
 
     return corsJson(env, { error: "Not found" }, 404);
   } catch (e) {
@@ -527,6 +530,30 @@ async function handleSetCutoverDate(request, env) {
   ).bind(cutover_date, account.id).run();
 
   return corsJson(env, { ok: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/prompt-optin — toggle prompt-prefix storage (off by default)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleSetPromptOptin(request, env) {
+  const account = await requireAccount(request, env);
+  if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
+
+  const body = await parseJson(request);
+  if (body.error) return corsJson(env, body, 400);
+
+  const { prompt_optin } = body;
+  const val = prompt_optin === 1 || prompt_optin === true ? 1 : 0;
+
+  await env.DB.prepare(
+    "UPDATE accounts SET prompt_storage_optin = ?, updated_at = datetime('now') WHERE id = ?"
+  ).bind(val, account.id).run();
+
+  // Invalidate KV cache so the proxy hot path re-reads the flag.
+  // The key meta cache uses key_hash; we don't have it here, but the TTL is 5min
+  // so the change will propagate at most 5min later for in-flight cached keys.
+  return corsJson(env, { ok: true, prompt_storage_optin: val });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

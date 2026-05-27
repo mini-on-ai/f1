@@ -17,6 +17,11 @@ id = "REPLACE_AFTER_wrangler_kv_namespace_create"
 # Origin allowed to call /api/* dashboard endpoints
 ALLOWED_ORIGIN = "https://mini-on-ai.com"
 
+# Deployed git SHA from the public mini-on-ai/f1 repo.
+# Manually bumped on each deploy; surfaced via X-F1-Commit response header
+# so customers can verify the running code matches the open-source commit.
+BUILD_COMMIT = "dev"
+
 # Site URL used in Stripe success/cancel callbacks
 SITE_URL = "https://mini-on-ai.com"
 
