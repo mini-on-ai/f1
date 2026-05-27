@@ -599,7 +599,7 @@ async function handleGetAlerts(request, env) {
     alert_fired_at: account.alert_fired_at,
     alert_fired_month: account.alert_fired_month,
     suggested_budget_usd: suggested,
-    spent_last_30d_usd: Number(spent30d.toFixed(2)),
+    spent_last_30d_usd: Number(spent30d.toFixed(6)),
     account_email: account.email,
   });
 }
