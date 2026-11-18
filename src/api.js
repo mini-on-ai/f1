@@ -681,7 +681,7 @@ async function handleTestAlert(request, env) {
   const account = await requireAccount(request, env);
   if (!account) return corsJson(env, { error: "Invalid or missing dashboard token." }, 401);
 
-  const dashboardUrl = `${env.SITE_URL || "https://mini-on-ai.com"}/f1/dashboard`;
+  const dashboardUrl = `${env.SITE_URL || "https://store.mini-on-ai.com"}/f1/dashboard`;
   const to = account.alert_email || account.email;
   const mtdSpend = 42.0;
   const threshold = 50.0;
@@ -905,7 +905,7 @@ client = anthropic.Anthropic(
 
   <hr style="border:none;border-top:1px solid #1e293b;margin:32px 0;">
   <p style="color:#475569;font-size:12px;">
-    You're receiving this because you signed up at mini-on-ai.com.<br>
+    You're receiving this because you signed up at store.mini-on-ai.com.<br>
     Questions? Reply to this email.<br>
     <a href="${env.SITE_URL}/f1/security" style="color:#6366F1;">Security &amp; Privacy</a>
   </p>
@@ -992,7 +992,7 @@ async function verifyStripeSignature(payload, signatureHeader, secret) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function corsJson(env, obj, status = 200) {
-  const origin = env?.ALLOWED_ORIGIN || "https://mini-on-ai.com";
+  const origin = env?.ALLOWED_ORIGIN || "https://store.mini-on-ai.com";
   return new Response(JSON.stringify(obj), {
     status,
     headers: {
@@ -1004,7 +1004,7 @@ export function corsJson(env, obj, status = 200) {
 }
 
 export function corsOk(env) {
-  const origin = env?.ALLOWED_ORIGIN || "https://mini-on-ai.com";
+  const origin = env?.ALLOWED_ORIGIN || "https://store.mini-on-ai.com";
   return new Response(null, {
     status: 204,
     headers: {

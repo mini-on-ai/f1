@@ -2,8 +2,8 @@
 
 **F1** is a lightweight Cloudflare Worker that sits in front of the Anthropic API. It authenticates requests with a per-account F1 key, forwards them transparently, and records token usage + USD cost to a D1 database. The dashboard shows spend breakdowns, optimization insights, and an audit log of every time your Anthropic key was used.
 
-→ **[Product page & sign-up](https://mini-on-ai.com/f1)**  
-→ **[Security commitments](https://mini-on-ai.com/f1/security)**
+→ **[Product page & sign-up](https://store.mini-on-ai.com/f1)**  
+→ **[Security commitments](https://store.mini-on-ai.com/f1/security)**
 
 ## How it works
 
@@ -152,7 +152,7 @@ const client = new Anthropic({
 
 ## Security
 
-See [mini-on-ai.com/f1/security](https://mini-on-ai.com/f1/security) for the full security commitments page.
+See [store.mini-on-ai.com/f1/security](https://store.mini-on-ai.com/f1/security) for the full security commitments page.
 
 Key points:
 - Customer Anthropic keys encrypted at rest (AES-GCM, per-account HKDF-derived key)

@@ -56,7 +56,7 @@ export async function checkAndFireBudgetAlert(env, accountId) {
        WHERE id = ?`
     ).bind(currentMonth, accountId).run();
 
-    const dashboardUrl = `${env.SITE_URL || "https://mini-on-ai.com"}/f1/dashboard`;
+    const dashboardUrl = `${env.SITE_URL || "https://store.mini-on-ai.com"}/f1/dashboard`;
     const to = account.alert_email || account.email;
 
     // Fire both channels in parallel; isolate failures.
@@ -117,7 +117,7 @@ export async function sendBudgetAlertEmail(env, { to, mtdSpend, threshold, dashb
 
   <hr style="border:none;border-top:1px solid #1e293b;margin:32px 0;">
   <p style="color:#475569;font-size:12px;">
-    F1 — mini-on-ai.com<br>
+    F1 — store.mini-on-ai.com<br>
     Don't want these? Set your monthly budget to blank on the dashboard.
   </p>
 </body>
@@ -174,7 +174,7 @@ export async function sendBudgetAlertWebhook(env, { url, mtdSpend, threshold, ac
           { title: "Spent this month", value: `$${mtd}`, short: true },
           { title: "Threshold", value: `$${thr}`, short: true },
         ],
-        footer: "F1 — mini-on-ai.com",
+        footer: "F1 — store.mini-on-ai.com",
       },
     ],
   };

@@ -15,7 +15,7 @@
  *   F1_KEY_ENCRYPTION_MASTER   — secret (base64-encoded 32+ bytes)
  *   F1_ADMIN_TOKEN             — secret (for /api/admin-stats)
  *   F1_FACTORY_DASHBOARD_TOKEN — secret (identifies factory account in public-stats)
- *   ALLOWED_ORIGIN             — var (default: https://mini-on-ai.com)
+ *   ALLOWED_ORIGIN             — var (default: https://store.mini-on-ai.com)
  *   SITE_URL                   — var
  *   STRIPE_PRICE_PRO           — var
  *   STRIPE_PRICE_SCALE         — var
@@ -80,7 +80,7 @@ async function route(request, env, ctx) {
     return new Response(
       JSON.stringify({
         name: "F1 — AI Cost Tracking Proxy",
-        docs: "https://mini-on-ai.com/f1",
+        docs: "https://store.mini-on-ai.com/f1",
         health: "/api/health",
         proxy: "/v1/messages",
         commit: env.BUILD_COMMIT || "dev",
@@ -89,7 +89,7 @@ async function route(request, env, ctx) {
       {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "https://mini-on-ai.com",
+          "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "https://store.mini-on-ai.com",
         },
       }
     );
